@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<!-- Load d3.js -->
+<script src="https://d3js.org/d3.v4.js"></script>
+
+
+
+<div> 
+
+  <div> 
+    <h2> Twitter Post Count before and after Covid </h2>
+
+    <p>  On March of 2020, the WHO declared COVID-19 a global health emergency. The federal government
+      Public Health Emergency ended on May 11, 2023. Select a date range to see what countries posted
+      the most during a select time frame. </p>
+  </div>
+
+
+<div>
+
+<!-- Date range inputs -->
+<label for="start">Start date:</label>
+<input type="date" id="start" name="start-date" value="2010-01-01">
+<label for="end">End date:</label>
+<input type="date" id="end" name="end-date" value="2023-12-31">
+<button onclick="update()">Update</button>
+
+<!-- Tooltip -->
+<div id="tooltip" style="position: absolute; top: 255px; left: 100;"></div>
+
+<!-- Create a div where the graph will take place -->
+<h2>Number of Posts by Country</h2>
+<div id="my_dataviz"></div>
+
+<!-- Create a div where the pie chart will take place -->
+<h2>Sentiment Pie Chart</h2>
+<div id="my_piechart"></div>
+
+<script>
+// set the dimensions and margins of the graph
+var margin = {top: 10, right: 10, bottom: 10, left: 10},
+    width = 400 - margin.left - margin.right, // reduced size
+    height = 400 - margin.top - margin.bottom; // reduced size
+
+    // append the svg object to the body of the page
+var svgTree = d3.select("#my_dataviz")
+.append("svg")
+.attr("width", width + margin.left + margin.right)
+.attr("height", height + margin.top + margin.bottom)
+.append("g")
+.attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+var svgPie = d3.select("#my_piechart")
+.append("svg")
+.attr("width", width + margin.left + margin.right)
+.attr("height", height + margin.top + margin.bottom)
+.append("g")
+.attr("transform", "translate(" + width / 2 + "," + height / 2 + ")");
+
+// Create a color scale
+var colorTree = d3.scaleOrdinal(d3.schemeCategory20);
+var colorPie = d3.scaleOrdinal()
+.domain(["Positive", "Negative", "Neutral"])
+.range(["green", "red", "grey"]);
+
+// Tooltip
+var tooltip = d3.select("#tooltip");
+
+// Function to update the graph
+function update() {
+  // Clear the SVG
+  svgTree.selectAll("*").remove();
+  svgPie.selectAll("*").remove();
+
+  // Get the selected date range
+  var startDate = new Date(document.getElementById("start").value);
+  var endDate = new Date(document.getElementById("end").value);
+
+  // Read data
+  d3.csv('data.csv', function(data) {
+    // Filter data based on date
+    var filteredData = data.filter(function(d) {
+      var date = new Date(d.Year, d.Month - 1, d.Day, d.Hour);
+      return date >= startDate && date <= endDate;
+    });
+
+    // Group data by country
+    var nestedData = d3.nest()
+      .key(function(d) { return d.Country; })
+      .rollup(function(v) { return v.length; })
+      .entries(filteredData);
+
+    // Add a dummy root node
+    nestedData.forEach(function(d) {
+      d.parentId = "root";
+    });
+    nestedData.unshift({key: "root", value: 0, parentId: ""});
+
+    // stratify the data: reformatting for d3.js
+    var root = d3.stratify()
+      .id(function(d) { return d.key; }) // Name of the entity (column name is name in csv)
+      .parentId(function(d) { return d.parentId; }) // Name of the parent (column name is parent in csv)
+      (nestedData);
+    root.sum(function(d) { return d.value; }) // Compute the numeric value for each entity
+
+    // Then d3.treemap computes the position of each element of the hierarchy
+    // The coordinates are added to the root object above
+    d3.treemap()
+      .size([width, height])
+      .padding(4)
+      (root)
+
+    // use this information to add rectangles:
+    var nodes = svgTree.selectAll("rect")
+      .data(root.leaves())
+      .enter()
+      .append("rect")
+      .attr('x', function (d) { return d.x0; })
+      .attr('y', function (d) { return d.y0; })
+      .attr('width', function (d) { return d.x1 - d.x0; })
+      .attr('height', function (d) { return d.y1 - d.y0; })
+      .style("stroke", "black")
+      .style("fill", function(d) { return colorTree(d.data.key); }) // use color scale
+      .on("mousemove", function(d){
+          tooltip
+            .style("display", "inline-block")
+            .html((d.data.key) + "<br>" + "Count: " + (d.data.value));
+      })
+      .on("mouseout", function(d){ tooltip.style("display", "none");});
+
+    // add the text labels inside the rectangles
+    svgTree.selectAll("text")
+      .data(root.leaves())
+      .enter()
+      .append("text")
+      .attr("x", function(d){ return d.x0 + (d.x1 - d.x0) / 2 }) // center position
+      .attr("y", function(d){ return d.y0 + (d.y1 - d.y0) / 2 }) // center position
+      .text(function(d){ return (d.x1 - d.x0) > 50 ? d.data.key : "" }) // conditionally display text
+      .attr("font-size", function(d) { return (d.x1 - d.x0) / 10 + "px" }) // scale font size
+      .attr("fill", "black")
+      .style("text-anchor", "middle") // center alignment
+      .style("alignment-baseline", "middle") // center alignment
+      .style("font-family", "Arial"); // change font
+
+    // Group data by sentiment
+    var sentimentData = d3.nest()
+      .key(function(d) { return d.Sentiment; })
+      .rollup(function(v) { return v.length; })
+      .entries(filteredData);
+
+    var total = d3.sum(sentimentData, function(d) { return d.value; });
+
+    // Create a pie chart
+    var pie = d3.pie()
+      .value(function(d) { return d.value; })
+      (sentimentData);
+
+    var arc = d3.arc()
+      .innerRadius(0)
+      .outerRadius(Math.min(width, height) / 2 - 1);
+
+    var arcs = svgPie.selectAll("g")
+      .data(pie)
+      .enter()
+      .append("g");
+
+    arcs.append("path")
+      .attr("fill", function(d) { return colorPie(d.data.key); })
+      .attr("stroke", "white")
+      .attr("d", arc);
+
+    // Add labels to the pie chart
+    arcs.append("text")
+      .attr("transform", function(d) { return "translate(" + arc.centroid(d) + ")"; })
+      .attr("dy", "0.35em")
+      .text(function(d) { return d.data.key + " (" + Math.round(100 * d.data.value / total) + "%)"; })
+      .style("text-anchor", "middle")
+      .style("font-size", "10px")
+      .style("fill", "black")
+      .style("font-family", "Arial");
+  });
+}
+</script>
+
+</div>
+
+</div>
